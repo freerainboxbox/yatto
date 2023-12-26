@@ -1,0 +1,16 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+flask = "*"
+pymongo = "*"
+requests = "*"
+argon2-cffi = "*"
+flask-security = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"
