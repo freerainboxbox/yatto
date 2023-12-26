@@ -9,7 +9,7 @@ pymongo = "*"
 requests = "*"
 argon2-cffi = "*"
 flask-security = "*"
-jwt = "*"
+pyjwt = "*"
 
 [dev-packages]
 

@@ -1,6 +1,5 @@
 import flask
 from flask import request, jsonify
-import flask_security
 import requests
 import json
 import os
@@ -28,14 +27,15 @@ app = flask.Flask(__name__)
 
 TOKEN_VALIDITY = datetime.timedelta(hours=2)
 
+db = None
+
 def main():
     unset_vars = [name for name in ENV_VAR_NAMES if not os.environ.get(name)]
     if unset_vars:
         raise ValueError(f"Environment variables {*unset_vars,} not set")
-    app.config["SECURITY_TOKEN_MAX_AGE"]=2 * (HOURS := 3600)
     app.config["SECRET_KEY"] = b64decode(os.environ.get("FLASK_SECRET_KEY"))
-    app.config["SECURITY_PASSWORD_HASH"] = "argon2"
     client = pymongo.MongoClient(f"mongodb://{os.environ.get('MONGO_USERNAME')}:{os.environ.get('MONGO_PASSWORD')}@{os.environ.get('MONGO_HOSTNAME')}")
+    global db
     db = client["db"]
     dbg_option = None
     match os.environ.get("DEBUG").lower():
