@@ -60,6 +60,26 @@ def main():
             raise ValueError("DEBUG environment variable must be set to a boolean value")
     app.run(host="0.0.0.0", port=5000, debug=dbg_option)
 
+def token_auth(func):
+    """Decorator for token authentication"""
+    def wrapper(*args, **kwargs):
+        if not request.headers.get("Authorization"):
+            return jsonify({"error": "No authorization header provided"}), 401
+        try:
+            jwt.decode(
+                request.headers["Authorization"],
+                app.config["SECRET_KEY"],
+                algorithms=["HS256"],
+                
+            )
+        except jwt.exceptions.ExpiredSignatureError:
+            return jsonify({"error": "Token expired"}), 401
+        except jwt.exceptions.InvalidSignatureError:
+            return jsonify({"error": "Invalid token"}), 401
+        return func(*args, **kwargs)
+    wrapper.__name__ = func.__name__
+    return wrapper
+
 @app.route("/api/login", methods=["POST"])
 def login():
     """Logs in a user and returns a JWT token"""
