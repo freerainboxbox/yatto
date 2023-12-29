@@ -5,8 +5,14 @@ name = "pypi"
 
 [packages]
 googlemaps = "*"
+ortools = "*"
+flask = "*"
+pymongo = "*"
+requests = "*"
+argon2-cffi = "*"
+flask-security = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.10"
+python_version = "3.12"
