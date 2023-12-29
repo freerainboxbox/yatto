@@ -104,8 +104,14 @@ def register():
         eml_vldtr.validate_email(data["username"], check_deliverability=True)
     except eml_vldtr.EmailNotValidError:
         return jsonify({"error": "Unable to deliver to email address"}), 400
-    #TODO: Finish validation steps
-    
+    if db.users.find_one({"username": data["username"]}):
+        return jsonify({"error": "User already exists"}), 409
+    db.users.insert_one({
+        "username": data["username"],
+        "password": Hasher.hash(data["password"]),
+    })
+    return jsonify({"error": None}), 200
+
 
 
 if __name__ == "__main__":
