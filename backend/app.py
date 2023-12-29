@@ -7,6 +7,7 @@ import argon2
 import pymongo
 import jwt
 import datetime
+import email_validator as eml_vldtr
 
 from base64 import b64decode
 
@@ -65,14 +66,14 @@ def login():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
-    if not data["username"]:
+    if not data.get("username"):
         return jsonify({"error": "No username provided"}), 400
-    if not data["password"]:
+    if not data.get("password"):
         return jsonify({"error": "No password provided"}), 400
-    user = db.users.find_one({"username": data["username"]})
-    if not user:
+    user_found = db.users.find_one({"username": data["username"]})
+    if not user_found:
         return jsonify({"error": "User not found"}), 404
-    if not Hasher.verify(user["password"], data["password"]):
+    if not Hasher.verify(user_found["password"], data["password"]):
         return jsonify({"error": "Incorrect password"}), 401
     return jsonify({
         "token": jwt.encode(
@@ -84,6 +85,28 @@ def login():
             algorithm="HS256",
         ),
     }), 200
+
+@app.route("/api/register", methods=["POST"])
+def register():
+    """Attempts to register a username (valid email) and password pair."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    if not data["username"]:
+        return jsonify({"error": "No username provided"}), 400
+    if not data["password"]:
+        return jsonify({"error": "No password provided"}), 400
+    try:
+        eml_vldtr.validate_email(data["username"], check_deliverability=False)
+    except eml_vldtr.EmailNotValidError:
+        return jsonify({"error": "Invalid email format"}), 400
+    try:
+        eml_vldtr.validate_email(data["username"], check_deliverability=True)
+    except eml_vldtr.EmailNotValidError:
+        return jsonify({"error": "Unable to deliver to email address"}), 400
+    #TODO: Finish validation steps
+    
+
 
 if __name__ == "__main__":
     main()

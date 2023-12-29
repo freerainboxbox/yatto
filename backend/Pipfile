@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 ortools = "*"
+email-validator = "*"
 
 [dev-packages]
 
