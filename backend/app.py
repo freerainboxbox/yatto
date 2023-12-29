@@ -10,10 +10,17 @@ import datetime
 import email_validator as eml_vldtr
 import ortools
 import googlemaps
+import numpy as np
 
 from base64 import b64decode
 
 ENV_VAR_NAMES = ("GOOGLE_MAPS_API_KEY", "MONGO_HOSTNAME", "MONGO_USERNAME", "MONGO_PASSWORD", "FLASK_SECRET_KEY", "DEBUG")
+
+# Mode constants
+VANILLA = '0'
+START_CONSTRAINT = '1'
+START_END_CONSTRAINT = '2'
+SHORTEST_OVERALL = '3'
 
 # According to https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
 Hasher = argon2.PasswordHasher().from_parameters({
@@ -134,6 +141,17 @@ def register():
     })
     return jsonify({"error": None}), 200
 
+@app.route("/api/optimize")
+@token_auth
+def optimize():
+    """Optimizes a route based on the given parameters
+        - waypoints: A list of Place IDs
+        If the mode is well-ordered, the first and last elements
+        of the list are the start and end points respectively.
+        - mode: One of the mode constants
+    """
+    # TODO: Implement optimization
+    pass
 
 
 if __name__ == "__main__":
