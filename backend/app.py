@@ -19,10 +19,10 @@ ENV_VAR_NAMES = ("GOOGLE_MAPS_API_KEY", "MONGO_HOSTNAME", "MONGO_USERNAME", "MON
 
 class TSPMode(Enum):
     """TSP mode constants"""
-    VANILLA = '0'
-    START_CONSTRAINT = '1'
-    START_END_CONSTRAINT = '2'
-    SHORTEST_OVERALL = '3'
+    VANILLA = 0
+    START_CONSTRAINT = 1
+    START_END_CONSTRAINT = 2
+    SHORTEST_OVERALL = 3
 
 class TransitMode(Enum):
     """Transit mode constants"""
@@ -168,7 +168,10 @@ def optimize():
         return jsonify({"error": "No TSP mode provided"}), 400
     if not data.get("transit_mode"):
         return jsonify({"error": "No transit mode provided"}), 400
-    if data["tsp_mode"] not in TSPMode.__members__:
+    tsp_mode = None
+    try:
+        tsp_mode = TSPMode[int(data["tsp_mode"])]
+    except (ValueError, KeyError):
         return jsonify({"error": "Invalid TSP mode"}), 400
     if data["transit_mode"] not in TransitMode.__members__:
         return jsonify({"error": "Invalid transit mode"}), 400
