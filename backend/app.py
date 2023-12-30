@@ -9,6 +9,7 @@ import jwt
 import datetime
 import email_validator as eml_vldtr
 import ortools
+from ortools.constraint_solver import pywrapcp
 import googlemaps
 import numpy as np
 
@@ -16,11 +17,18 @@ from base64 import b64decode
 
 ENV_VAR_NAMES = ("GOOGLE_MAPS_API_KEY", "MONGO_HOSTNAME", "MONGO_USERNAME", "MONGO_PASSWORD", "FLASK_SECRET_KEY", "DEBUG")
 
-# Mode constants
-VANILLA = '0'
-START_CONSTRAINT = '1'
-START_END_CONSTRAINT = '2'
-SHORTEST_OVERALL = '3'
+class TSPMode(Enum):
+    """TSP mode constants"""
+    VANILLA = '0'
+    START_CONSTRAINT = '1'
+    START_END_CONSTRAINT = '2'
+    SHORTEST_OVERALL = '3'
+
+class TransitMode(Enum):
+    """Transit mode constants"""
+    DRIVING = 'driving'
+    WALKING = 'walking'
+    BICYCLING = 'bicycling'
 
 # According to https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
 Hasher = argon2.PasswordHasher().from_parameters({
@@ -148,10 +156,54 @@ def optimize():
         - waypoints: A list of Place IDs
         If the mode is well-ordered, the first and last elements
         of the list are the start and end points respectively.
-        - mode: One of the mode constants
+        - tsp_mode: One of the TSP mode constants
+        - transit_mode: One of the transit mode constants
     """
-    # TODO: Implement optimization
-    pass
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    if not data.get("waypoints"):
+        return jsonify({"error": "No waypoints provided"}), 400
+    if not data.get("tsp_mode"):
+        return jsonify({"error": "No TSP mode provided"}), 400
+    if not data.get("transit_mode"):
+        return jsonify({"error": "No transit mode provided"}), 400
+    if data["tsp_mode"] not in TSPMode.__members__:
+        return jsonify({"error": "Invalid TSP mode"}), 400
+    if data["transit_mode"] not in TransitMode.__members__:
+        return jsonify({"error": "Invalid transit mode"}), 400
+    waypoints = data["waypoints"]
+    if not isinstance(waypoints, list):
+        return jsonify({"error": "Waypoints must be a list"}), 400
+    client = googlemaps.Client(key=os.environ.get("GOOGLE_MAPS_API_KEY"))
+    match data["tsp_mode"]:
+        case TSPMode.VANILLA:
+            matrix = client.distance_matrix(
+                waypoints,
+                waypoints,
+                mode=data["transit_mode"],
+            )
+            # Create the router
+            router = pywrapcp.RoutingModel(
+                pywrapcp.RoutingIndexManager(
+                    len(waypoints),
+                    1,
+                    0,
+                )
+            )
+            # FIXME: Need to figure out what the return value of distance_matrix looks like
+            callback_index = router.RegisterTransitCallback(
+                lambda i, j: matrix[i][j]
+            )
+        case TSPMode.START_CONSTRAINT:
+            pass
+        case TSPMode.START_END_CONSTRAINT:
+            pass
+        case TSPMode.SHORTEST_OVERALL:
+            pass
+        case _:
+            return jsonify({"error": "Invalid TSP mode"}), 400
+    
 
 
 if __name__ == "__main__":
