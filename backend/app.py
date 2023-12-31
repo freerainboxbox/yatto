@@ -242,6 +242,8 @@ def optimize():
             # Set all distances back to start as 0
             for i in range(len(matrix)):
                 matrix[i][0] = 0
+
+            # Optimize modified problem
             solution = None
             try:
                 solution = optimize_simple_matrix(matrix)
@@ -251,19 +253,39 @@ def optimize():
             return jsonify(solution)
         case TSPMode.START_END_CONSTRAINT:
             # Base Cases
-            # 1 waypoint
-            return jsonify({'order': [0], 'time': 0})
-            # TODO: Complete base cases
+            match len(matrix):
+                case 1:
+                    return jsonify({"order": [0], "time": 0}), 200
+                case 2:
+                    return jsonify({"order": [0, 1], "time": matrix[0][1]}), 200
+                case 3:
+                    return jsonify({"order": [0, 1, 2], "time": matrix[0][1] + matrix[1][2]}), 200
+                case _:
+                    pass
 
-            # Construct additional node v such that:
+            # Construct additional node v at start such that:
             # - dist(nth node -> v) = 0
             # - dist(v -> 0th node) = 0
             # - dist(v -> all other nodes) = inf
             # - dist(all other nodes -> v) = inf
             # - dist(v -> v) = 0
+            n = len(matrix)+1
+            matrix = np.array(matrix)
+            matrix = np.insert(matrix, 0, INFINITY, axis=0)
+            matrix = np.insert(matrix, 0, INFINITY, axis=1)
+            matrix[0][0] = 0 # identity map
+            matrix[0][1] = 0 # v to 0th node
+            matrix[n][0] = 0 # nth node to v
 
-            # TODO: Complete construction of additional node
-
+            # Optimize modified problem
+            solution = None
+            try:
+                solution = optimize_simple_matrix(matrix)
+            except RuntimeError as e:
+                return jsonify({"error": e}), 400
+            # Remove both instances of v from solution
+            solution['order'] = solution['order'][1:-1]
+            return jsonify(solution)
         case TSPMode.SHORTEST_OVERALL:
             pass
         case _:
