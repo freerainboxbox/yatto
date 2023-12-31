@@ -262,7 +262,7 @@ def optimize():
             # - dist(all other nodes -> v) = inf
             # - dist(v -> v) = 0
 
-            # TODO: Complete construction of additional node            
+            # TODO: Complete construction of additional node
 
         case TSPMode.SHORTEST_OVERALL:
             pass
