@@ -281,7 +281,7 @@ def optimize():
             # Optimize modified problem
             solution = None
             try:
-                solution = optimize_simple_matrix(matrix)
+                solution = optimize_simple_matrix(matrix.tolist())
             except RuntimeError as e:
                 return jsonify({"error": e}), 400
             # Remove both instances of v from solution
