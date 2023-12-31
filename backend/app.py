@@ -12,7 +12,6 @@ import argon2
 import pymongo
 import jwt
 import email_validator as eml_vldtr
-import ortools
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 import googlemaps
 import numpy as np
@@ -177,13 +176,13 @@ def simple_distance_matrix(client: googlemaps.Client, waypoints: list[str], tran
 
 def optimize_simple_matrix(matrix: list[list[int]]) -> dict:
     """Optimizes a route based on the given distance matrix."""
-    manager = pywrapcp.RoutingIndexManager(len(waypoints), 1, 0)
+    manager = pywrapcp.RoutingIndexManager(len(matrix), 1, 0)
     routing = pywrapcp.RoutingModel(manager)
     callback_index = routing.RegisterTransitCallback(
         lambda i, j: matrix[i][j]
     )
     routing.SetArcCostEvaluatorOfAllVehicles(callback_index)
-    search_parameters = pywrapcp.DefaultRoutingSearchParameters
+    search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     solution = routing.SolveWithParameters(search_parameters)
     if not solution:
@@ -225,13 +224,15 @@ def optimize():
         tsp_mode = TSPMode[int(data["tsp_mode"])]
     except (ValueError, KeyError):
         return jsonify({"error": "Invalid TSP mode"}), 400
-    if data["transit_mode"] not in TransitMode.__members__:
-        return jsonify({"error": "Invalid transit mode"}), 400
     waypoints = data["waypoints"]
     if not isinstance(waypoints, list):
         return jsonify({"error": "Waypoints must be a list"}), 400
     client = googlemaps.Client(key=os.environ.get("GOOGLE_MAPS_API_KEY"))
-    matrix = simple_distance_matrix(client, waypoints, TransitMode[data["transit_mode"]])
+    matrix = None
+    try:
+        matrix = simple_distance_matrix(client, waypoints, TransitMode(data["transit_mode"]))
+    except ValueError as e:
+        return jsonify({"error": e}), 400
     match data["tsp_mode"]:
         case TSPMode.VANILLA:
             try:
@@ -288,11 +289,32 @@ def optimize():
             solution['order'] = solution['order'][1:-1]
             return jsonify(solution)
         case TSPMode.SHORTEST_OVERALL:
-            pass
+            # Construct additional node v at start such that:
+            # - dist(v -> all nodes) = 0
+            # - dist(all nodes -> v) = 0
+            matrix = np.array(matrix)
+            matrix = np.insert(matrix, 0, 0, axis=0)
+            matrix = np.insert(matrix, 0, 0, axis=1)
+
+            # Optimize modified problem
+            solution = None
+            try:
+                solution = optimize_simple_matrix(matrix.tolist())
+            except RuntimeError as e:
+                return jsonify({"error": e}), 400
+            # Remove both instances of v from solution
+            solution['order'] = solution['order'][1:-1]
+            return jsonify(solution)
         case _:
             return jsonify({"error": "Invalid TSP mode"}), 400
-    
 
+@app.route("/api/save_trip", methods=["POST", "PUT"])
+@token_auth
+def save_trip():
+    """Saves a trip to the database. May or may not contain the optimized route."""
+    #TODO: Implment trip saving
+    pass
+    
 
 if __name__ == "__main__":
     main()
