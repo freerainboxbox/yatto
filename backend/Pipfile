@@ -11,6 +11,7 @@ pymongo = "*"
 requests = "*"
 argon2-cffi = "*"
 flask-security = "*"
+pybase62 = "*"
 
 [dev-packages]
 
