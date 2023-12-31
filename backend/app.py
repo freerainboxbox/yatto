@@ -270,12 +270,13 @@ def optimize():
             # - dist(all other nodes -> v) = inf
             # - dist(v -> v) = 0
             n = len(matrix)+1
+            v = 0
             matrix = np.array(matrix)
             matrix = np.insert(matrix, 0, INFINITY, axis=0)
             matrix = np.insert(matrix, 0, INFINITY, axis=1)
-            matrix[0][0] = 0 # identity map
-            matrix[0][1] = 0 # v to 0th node
-            matrix[n][0] = 0 # nth node to v
+            matrix[v][v] = 0
+            matrix[v][1] = 0
+            matrix[n][v] = 0
 
             # Optimize modified problem
             solution = None
