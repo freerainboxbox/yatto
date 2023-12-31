@@ -1,6 +1,8 @@
 import os
 import datetime
 from base64 import b64decode
+import base62
+
 from enum import Enum
 from sys import maxsize as INFINITY
 
@@ -10,6 +12,9 @@ import requests
 import json
 import argon2
 import pymongo
+from bson.objectid import ObjectId
+oidtob62 = lambda oid: base62.encodebytes(oid.binary)
+b62tooid = lambda b62: ObjectId(base62.decodebytes(b62).hex())
 import jwt
 import email_validator as eml_vldtr
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
@@ -196,9 +201,9 @@ def optimize_simple_matrix(matrix: list[list[int]]) -> dict:
         index = solution.Value(routing.NextVar(index))
         total_time += routing.GetArcCostForVehicle(prev, index, 0)
         optimized_order.append(manager.IndexToNode(index))
-    return {"order": optimized_order, "time": total_time}
+    return {"optimized_order": optimized_order, "time": total_time}
 
-@app.route("/api/optimize")
+@app.route("/api/optimize", methods=["GET", "PUT"])
 @token_auth
 def optimize():
     """Optimizes a route based on the given parameters.
@@ -213,6 +218,11 @@ def optimize():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
+    if request.method() == "PUT":
+        if not data.get("trip_id"):
+            return jsonify({"error": "No trip ID provided for PUT"}), 400
+        if not db.trips.find_one({"_id": b62tooid(data["trip_id"])}):
+            return jsonify({"error": "Trip not found"}), 404
     if not data.get("waypoints"):
         return jsonify({"error": "No waypoints provided"}), 400
     if not data.get("tsp_mode"):
@@ -221,9 +231,9 @@ def optimize():
         return jsonify({"error": "No transit mode provided"}), 400
     tsp_mode = None
     try:
-        tsp_mode = TSPMode[int(data["tsp_mode"])]
-    except (ValueError, KeyError):
-        return jsonify({"error": "Invalid TSP mode"}), 400
+        tsp_mode = TSPMode(int(data["tsp_mode"]))
+    except ValueError as e:
+        return jsonify({"error": e}), 400
     waypoints = data["waypoints"]
     if not isinstance(waypoints, list):
         return jsonify({"error": "Waypoints must be a list"}), 400
@@ -233,34 +243,33 @@ def optimize():
         matrix = simple_distance_matrix(client, waypoints, TransitMode(data["transit_mode"]))
     except ValueError as e:
         return jsonify({"error": e}), 400
-    match data["tsp_mode"]:
+    solution = None
+    match tsp_mode:
         case TSPMode.VANILLA:
             try:
-                return jsonify(optimize_simple_matrix(matrix)), 200
+                solution = optimize_simple_matrix(matrix)
             except RuntimeError as e:
                 return jsonify({"error": e}), 400
         case TSPMode.START_CONSTRAINT:
             # Set all distances back to start as 0
-            for i in range(len(matrix)):
-                matrix[i][0] = 0
-
+            for row in matrix:
+                row[0] = 0
             # Optimize modified problem
             solution = None
             try:
                 solution = optimize_simple_matrix(matrix)
             except RuntimeError as e:
                 return jsonify({"error": e}), 400
-            solution['order'] = solution['order'][:-1]
-            return jsonify(solution)
+            solution["optimized_order"] = solution["optimized_order"][:-1]
         case TSPMode.START_END_CONSTRAINT:
             # Base Cases
             match len(matrix):
                 case 1:
-                    return jsonify({"order": [0], "time": 0}), 200
+                    return jsonify({"optimized_order": [0], "time": 0}), 200
                 case 2:
-                    return jsonify({"order": [0, 1], "time": matrix[0][1]}), 200
+                    return jsonify({"optimized_order": [0, 1], "time": matrix[0][1]}), 200
                 case 3:
-                    return jsonify({"order": [0, 1, 2], "time": matrix[0][1] + matrix[1][2]}), 200
+                    return jsonify({"optimized_order": [0, 1, 2], "time": matrix[0][1] + matrix[1][2]}), 200
                 case _:
                     pass
 
@@ -286,8 +295,7 @@ def optimize():
             except RuntimeError as e:
                 return jsonify({"error": e}), 400
             # Remove both instances of v from solution
-            solution['order'] = solution['order'][1:-1]
-            return jsonify(solution)
+            solution["optimized_order"] = solution["optimized_order"][1:-1]
         case TSPMode.SHORTEST_OVERALL:
             # Construct additional node v at start such that:
             # - dist(v -> all nodes) = 0
@@ -303,10 +311,17 @@ def optimize():
             except RuntimeError as e:
                 return jsonify({"error": e}), 400
             # Remove both instances of v from solution
-            solution['order'] = solution['order'][1:-1]
-            return jsonify(solution)
+            solution["optimized_order"] = solution["optimized_order"][1:-1]
         case _:
             return jsonify({"error": "Invalid TSP mode"}), 400
+    if request.method() == "PUT":
+        db.trips.update_one({"_id": b62tooid(data["trip_id"])},
+            {"$set": {
+                "optimized_order": solution["optimized_order"],
+                "time": datetime.timedelta(seconds=solution["time"]),
+            }}
+        )
+    return jsonify(solution), 200
 
 @app.route("/api/save_trip", methods=["POST", "PUT"])
 @token_auth
@@ -314,7 +329,7 @@ def save_trip():
     """Saves a trip to the database. May or may not contain the optimized route."""
     #TODO: Implment trip saving
     pass
-    
+
 
 if __name__ == "__main__":
     main()
