@@ -122,7 +122,7 @@ def token_auth(func: callable):
             return jsonify({"error": "Token expired"}), 401
         except jwt.exceptions.InvalidSignatureError:
             return jsonify({"error": "Invalid token"}), 401
-        return func(username = authoritative_user, *args, **kwargs)
+        return func(username=authoritative_user, *args, **kwargs)
 
     wrapper.__name__ = func.__name__
     return wrapper
@@ -177,7 +177,14 @@ def register():
     try:
         eml_vldtr.validate_email(data["username"], check_deliverability=True)
     except eml_vldtr.EmailNotValidError:
-        return jsonify({"error": "Email address is unreachable, double-check that it is valid."}), 400
+        return (
+            jsonify(
+                {
+                    "error": "Email address is unreachable, double-check that it is valid."
+                }
+            ),
+            400,
+        )
     if db.users.find_one({"username": data["username"]}):
         return jsonify({"error": "User already exists"}), 409
     db.users.insert_one(
@@ -216,10 +223,10 @@ def simple_distance_matrix(
 
 def optimize_simple_matrix(matrix: list[list[int]]) -> dict:
     """Optimizes a route based on the given distance matrix.
-    
+
     Input:
     - matrix: A distance matrix (time in seconds) for the waypoints
-    
+
     Output:
     - optimized_order: A list of indices of the waypoints in optimized order
     - time: The time taken to complete the route"""
@@ -248,7 +255,7 @@ def optimize_simple_matrix(matrix: list[list[int]]) -> dict:
 
 @app.route("/api/optimize", methods=["GET", "PUT"])
 @token_auth
-def optimize():
+def optimize(username):
     """Optimizes a route based on the given parameters.
 
     Input:
@@ -383,7 +390,7 @@ def optimize():
         waypoints = [waypoints[i] for i in solution["optimized_order"]]
         # Check that trip belongs to user using username field in database
         owner = db.trips.find_one({"_id": b62tooid(data["trip_id"])})["username"]
-        if owner == data["username"]:
+        if owner == username:
             db.trips.update_one(
                 {"_id": b62tooid(data["trip_id"])},
                 {
@@ -404,7 +411,7 @@ def optimize():
 
 @app.route("/api/save_trip", methods=["POST", "PUT"])
 @token_auth
-def save_trip():
+def save_trip(username):
     """Saves a trip to the database. May or may not contain the optimized route.
     Input:
         - trip_id (str): The ID of the trip to save, base62 (PUT only)
@@ -422,10 +429,10 @@ def save_trip():
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
-    if request.method() == "POST"
+    if request.method() == "POST":
         if not data.get("name"):
             return jsonify({"error": "No name provided"}), 400
-        if db.trips.find_one({"username": data["username"], "name": data["name"]}):
+        if db.trips.find_one({"username": username, "name": data["name"]}):
             return jsonify({"error": "Duplicate trip name"}), 409
     if request.method() == "PUT":
         if not data.get("trip_id"):
@@ -434,7 +441,7 @@ def save_trip():
             return jsonify({"error": "Trip not found"}), 404
         if db.trips.find_one(
             {
-                "username": data["username"],
+                "username": username,
                 "name": data["name"],
                 "_id": {"$ne": b62tooid(data["trip_id"])},
             }
@@ -471,11 +478,13 @@ def save_trip():
         trip_id = oidtob62(
             db.trips.insert_one(
                 {
-                    "username": data["username"],
+                    "username": username,
                     "name": data["name"],
                     "waypoints": data["waypoints"],
                     "optimized": data["optimized"],
-                    "optimization_type": optimization_type.value if optimization_type else None,
+                    "optimization_type": optimization_type.value
+                    if optimization_type
+                    else None,
                     "transit_mode": transit_mode.value if transit_mode else None,
                     "time": datetime.timedelta(seconds=data["time"]),
                     "modified_at": datetime.datetime.now(),
@@ -488,11 +497,13 @@ def save_trip():
             {"_id": b62tooid(trip_id)},
             {
                 "$set": {
-                    "username": data["username"],
+                    "username": username,
                     "name": data["name"],
                     "waypoints": data["waypoints"],
                     "optimized": data["optimized"],
-                    "optimization_type": optimization_type.value if optimization_type else None,
+                    "optimization_type": optimization_type.value
+                    if optimization_type
+                    else None,
                     "transit_mode": transit_mode.value if transit_mode else None,
                     "time": datetime.timedelta(seconds=data["time"]),
                     "modified_at": datetime.datetime.now(),
@@ -501,9 +512,10 @@ def save_trip():
         )
     return jsonify({"error": None, "trip_id": trip_id}), 200
 
+
 @app.route("/api/delete_trip", methods=["DELETE"])
 @token_auth
-def delete_trip():
+def delete_trip(username):
     """Deletes a trip from the database.
     Input:
         - trip_id (str): The ID of the trip to delete, base62
@@ -523,11 +535,12 @@ def delete_trip():
         return jsonify({"error": "Trip does not belong to user"}), 401
     return jsonify({"error": None}), 200
 
+
 @app.route("/api/get_trips", methods=["GET"])
 @token_auth
-def get_trips():
-    """Get trips belonging to a user.
-    
+def get_trips(username):
+    """Get listable trips belonging to a user, at a glance.
+
     Input:
         - query (str): A query string to filter trips by name (optional)
         - total (int): The total number of trips to return (optional)
@@ -544,6 +557,9 @@ def get_trips():
             time (timedelta, seconds),
             modified_at (datetime, UNIX seconds),
         }
+
+    Trips are selected by closeness to query string (if applicable),
+    then sorted by most recently modified.
     """
     data = request.get_json()
     if not data.get("query"):
@@ -559,20 +575,118 @@ def get_trips():
         {"$limit": data["total"]},
         {"$sort": {"modified_at": -1}},
         {"$match": {"name": {"$regex": data["query"], "$options": "i"}}},
-        {"$project": {
-            "trip_id": 1,
-            "name": 1,
-            "optimized": 1,
-            "optimization_type": 1,
-            "transit_mode": 1,
-            "time": 1,
-            "modified_at": 1
-        }}
+        {
+            "$project": {
+                "trip_id": 1,
+                "name": 1,
+                "optimized": 1,
+                "optimization_type": 1,
+                "transit_mode": 1,
+                "time": 1,
+                "modified_at": 1,
+            }
+        },
     ]
-    trips = list(db.trips.aggregate(pipeline))
-    # TODO: Add return value
-    
-    
+    try:
+        return (
+            jsonify(
+                {
+                    "error": None,
+                    "trips": list(db.trips.aggregate(pipeline)),
+                }
+            ),
+            200,
+        )
+    except Exception as e:
+        return jsonify({"error": e}), 500
+
+
+@app.route("/api/get_trip", methods=["GET"])
+@token_auth
+def get_trip(username):
+    """Get specific trip information.
+    Input:
+        - trip_id (str): The ID of the trip to get, base62
+
+    Output:
+        - error (str): nullable
+        - trip_id (str)
+        - name (str)
+        - waypoints (str[])
+        - optimized (bool)
+        - optimization_type (TSPMode, nullable)
+        - transit_mode (TransitMode, nullable)
+        - time (timedelta, seconds)
+        - modified_at (datetime, UNIX seconds)
+    """
+
+
+def place_id_to_plus_code(client: googlemaps.Client, place_id: str) -> str:
+    """Converts a Place ID to a plus code.
+
+    Input:
+    - client: A Google Maps API client object
+    - place_id: A Place ID
+
+    Output:
+    - plus_code: A plus code
+    """
+    return client.place(place_id)["plus_code"]["global_code"]
+
+
+def place_id_to_name(client: googlemaps.Client, place_id: str) -> str:
+    """Converts a Place ID to a name.
+
+    Input:
+    - client: A Google Maps API client object
+    - place_id: A Place ID
+
+    Output:
+    - name: A name
+    """
+    return client.place(place_id)["name"]
+
+
+@app.route("/api/map_url", methods=["GET"])
+@token_auth
+def map_url(username):
+    """Get a URL to a map of the given waypoints, allowing user to navigate.
+    Input:
+        - trip_id (str): The ID of the trip to get, base62
+
+    Output:
+        - error (str): nullable
+        - url (str): The URL to the map
+
+    This endpoint will only return a URL if the user owns the trip and the trip is already optimized.
+    """
+    data = request.get_json()
+    if not data.get("trip_id"):
+        return jsonify({"error": "No trip ID provided"}), 400
+    trip_found = db.trips.find_one({"_id": b62tooid(data["trip_id"])})
+    if not trip_found:
+        return jsonify({"error": "Trip not found"}), 404
+    if trip_found["username"] != username:
+        return jsonify({"error": "Trip does not belong to user"}), 401
+    if not trip_found["optimized"]:
+        return jsonify({"error": "Trip must be optimized"}), 405
+    client = googlemaps.Client(key=os.environ.get("GOOGLE_MAPS_API_KEY"))
+    origin_name = place_id_to_name(client, trip_found["waypoints"][0])
+    destination_name = place_id_to_name(client, trip_found["waypoints"][-1])
+    # Get plus codes for all intermediate waypoints [1:-2]
+    intermediate_plus_codes = [
+        place_id_to_plus_code(client, place_id)
+        for place_id in trip_found["waypoints"][1:-1]
+    ]
+    url = (
+        "https://www.google.com/maps/dir/?api=1&origin="
+        + requests.utils.quote(origin_name)
+        + "&destination="
+        + requests.utils.quote(destination_name)
+        + "&waypoints="
+        + "%7C".join(intermediate_plus_codes)
+    )
+    return jsonify({"error": None, "url": url}), 200
 
 if __name__ == "__main__":
     main()
