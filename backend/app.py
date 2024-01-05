@@ -13,6 +13,7 @@ import json
 import argon2
 import pymongo
 from bson.objectid import ObjectId
+
 oidtob62 = lambda oid: base62.encodebytes(oid.binary)
 b62tooid = lambda b62: ObjectId(base62.decodebytes(b62).hex())
 import jwt
@@ -21,32 +22,45 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 import googlemaps
 import numpy as np
 
+ENV_VAR_NAMES = (
+    "GOOGLE_MAPS_API_KEY",
+    "MONGO_HOSTNAME",
+    "MONGO_USERNAME",
+    "MONGO_PASSWORD",
+    "FLASK_SECRET_KEY",
+    "DEBUG",
+)
 
-ENV_VAR_NAMES = ("GOOGLE_MAPS_API_KEY", "MONGO_HOSTNAME", "MONGO_USERNAME", "MONGO_PASSWORD", "FLASK_SECRET_KEY", "DEBUG")
 
 class TSPMode(Enum):
     """TSP mode constants"""
+
     VANILLA = 0
     START_CONSTRAINT = 1
     START_END_CONSTRAINT = 2
     SHORTEST_OVERALL = 3
 
+
 class TransitMode(Enum):
     """Transit mode constants"""
-    DRIVING = 'driving'
-    WALKING = 'walking'
-    BICYCLING = 'bicycling'
+
+    DRIVING = "driving"
+    WALKING = "walking"
+    BICYCLING = "bicycling"
+
 
 # According to https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
-Hasher = argon2.PasswordHasher().from_parameters({
-    "time_cost": 2,
-    "memory_cost": 19 * (MiB := 1024),
-    "parallelism": 2,
-    "hash_len": 32,
-    "salt_len": 16,
-    "encoding": "utf-8",
-    "type": argon2.Type.ID,
-})
+Hasher = argon2.PasswordHasher().from_parameters(
+    {
+        "time_cost": 2,
+        "memory_cost": 19 * (MiB := 1024),
+        "parallelism": 2,
+        "hash_len": 32,
+        "salt_len": 16,
+        "encoding": "utf-8",
+        "type": argon2.Type.ID,
+    }
+)
 
 app = flask.Flask(__name__)
 
@@ -54,13 +68,16 @@ TOKEN_VALIDITY = datetime.timedelta(hours=2)
 
 db = None
 
+
 def main():
     """Starts the API server"""
     unset_vars = [name for name in ENV_VAR_NAMES if not os.environ.get(name)]
     if unset_vars:
         raise ValueError(f"Environment variables {*unset_vars,} not set")
     app.config["SECRET_KEY"] = b64decode(os.environ.get("FLASK_SECRET_KEY"))
-    client = pymongo.MongoClient(f"mongodb://{os.environ.get('MONGO_USERNAME')}:{os.environ.get('MONGO_PASSWORD')}@{os.environ.get('MONGO_HOSTNAME')}")
+    client = pymongo.MongoClient(
+        f"mongodb://{os.environ.get('MONGO_USERNAME')}:{os.environ.get('MONGO_PASSWORD')}@{os.environ.get('MONGO_HOSTNAME')}"
+    )
     global db
     db = client["db"]
     dbg_option = None
@@ -82,28 +99,34 @@ def main():
         case "false":
             dbg_option = False
         case _:
-            raise ValueError("DEBUG environment variable must be set to a boolean value")
+            raise ValueError(
+                "DEBUG environment variable must be set to a boolean value"
+            )
     app.run(host="0.0.0.0", port=5000, debug=dbg_option)
+
 
 def token_auth(func: callable):
     """Decorator for token authentication"""
+
     def wrapper(*args, **kwargs):
         if not request.headers.get("Authorization"):
             return jsonify({"error": "No authorization header provided"}), 401
+        authoritative_user = None
         try:
-            jwt.decode(
+            authoritative_user = jwt.decode(
                 request.headers["Authorization"],
                 app.config["SECRET_KEY"],
                 algorithms=["HS256"],
-                
             )
         except jwt.exceptions.ExpiredSignatureError:
             return jsonify({"error": "Token expired"}), 401
         except jwt.exceptions.InvalidSignatureError:
             return jsonify({"error": "Invalid token"}), 401
-        return func(*args, **kwargs)
+        return func(username = authoritative_user, *args, **kwargs)
+
     wrapper.__name__ = func.__name__
     return wrapper
+
 
 @app.route("/api/login", methods=["POST"])
 def login():
@@ -120,16 +143,22 @@ def login():
         return jsonify({"error": "User not found"}), 404
     if not Hasher.verify(user_found["password"], data["password"]):
         return jsonify({"error": "Incorrect password"}), 401
-    return jsonify({
-        "token": jwt.encode(
+    return (
+        jsonify(
             {
-                "username": data["username"],
-                "exp": datetime.datetime.now()+TOKEN_VALIDITY,
-            },
-            app.config["SECRET_KEY"],
-            algorithm="HS256",
+                "token": jwt.encode(
+                    {
+                        "username": data["username"],
+                        "exp": datetime.datetime.now() + TOKEN_VALIDITY,
+                    },
+                    app.config["SECRET_KEY"],
+                    algorithm="HS256",
+                ),
+            }
         ),
-    }), 200
+        200,
+    )
+
 
 @app.route("/api/register", methods=["POST"])
 def register():
@@ -148,16 +177,21 @@ def register():
     try:
         eml_vldtr.validate_email(data["username"], check_deliverability=True)
     except eml_vldtr.EmailNotValidError:
-        return jsonify({"error": "Unable to deliver to email address"}), 400
+        return jsonify({"error": "Email address is unreachable, double-check that it is valid."}), 400
     if db.users.find_one({"username": data["username"]}):
         return jsonify({"error": "User already exists"}), 409
-    db.users.insert_one({
-        "username": data["username"],
-        "password": Hasher.hash(data["password"]),
-    })
+    db.users.insert_one(
+        {
+            "username": data["username"],
+            "password": Hasher.hash(data["password"]),
+        }
+    )
     return jsonify({"error": None}), 200
 
-def simple_distance_matrix(client: googlemaps.Client, waypoints: list[str], transit_mode: TransitMode) -> list[list[int]]:
+
+def simple_distance_matrix(
+    client: googlemaps.Client, waypoints: list[str], transit_mode: TransitMode
+) -> list[list[int]]:
     """Returns a simple distance (time) matrix for the given waypoints,
     with each cell containing time in seconds.
 
@@ -166,7 +200,7 @@ def simple_distance_matrix(client: googlemaps.Client, waypoints: list[str], tran
     - waypoints: A list of Place IDs
     - transit_mode: One of the transit mode constants
     """
-    waypoints = ["place_id:"+place_id for place_id in waypoints]
+    waypoints = ["place_id:" + place_id for place_id in waypoints]
     response = client.distance_matrix(
         waypoints,
         waypoints,
@@ -174,21 +208,29 @@ def simple_distance_matrix(client: googlemaps.Client, waypoints: list[str], tran
     )
     # Extract the distance matrix (as values of time)
     # (origin points)
-    rows = [row['elements'] for row in response['rows']]
+    rows = [row["elements"] for row in response["rows"]]
     # (origin, destination)
-    matrix = [[column['duration']['value'] for column in row] for row in rows]
+    matrix = [[column["duration"]["value"] for column in row] for row in rows]
     return matrix
 
+
 def optimize_simple_matrix(matrix: list[list[int]]) -> dict:
-    """Optimizes a route based on the given distance matrix."""
+    """Optimizes a route based on the given distance matrix.
+    
+    Input:
+    - matrix: A distance matrix (time in seconds) for the waypoints
+    
+    Output:
+    - optimized_order: A list of indices of the waypoints in optimized order
+    - time: The time taken to complete the route"""
     manager = pywrapcp.RoutingIndexManager(len(matrix), 1, 0)
     routing = pywrapcp.RoutingModel(manager)
-    callback_index = routing.RegisterTransitCallback(
-        lambda i, j: matrix[i][j]
-    )
+    callback_index = routing.RegisterTransitCallback(lambda i, j: matrix[i][j])
     routing.SetArcCostEvaluatorOfAllVehicles(callback_index)
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-    search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    search_parameters.first_solution_strategy = (
+        routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    )
     solution = routing.SolveWithParameters(search_parameters)
     if not solution:
         raise RuntimeError("No solution found")
@@ -203,17 +245,24 @@ def optimize_simple_matrix(matrix: list[list[int]]) -> dict:
         optimized_order.append(manager.IndexToNode(index))
     return {"optimized_order": optimized_order, "time": total_time}
 
+
 @app.route("/api/optimize", methods=["GET", "PUT"])
 @token_auth
 def optimize():
     """Optimizes a route based on the given parameters.
 
     Input:
-        - waypoints: A list of Place IDs
+        - trip_id (str): The ID of the trip to optimize, base62 (PUT only)
+        - waypoints (str[]): A list of Place IDs (should NOT have the "placeid:" prefix)
         If the mode is well-ordered, the first and last elements
         of the list are the start and end points respectively.
-        - tsp_mode: One of the TSP mode constants
-        - transit_mode: One of the transit mode constants
+        - tsp_mode (TSPMode): One of the TSP mode constants
+        - transit_mode (TransitMode): One of the transit mode constants
+
+    Output:
+        - error (str): nullable
+        - optimized_order (int[]): A list of indices of the waypoints in optimized order
+        - time (int): The time taken to complete the route
     """
     data = request.get_json()
     if not data:
@@ -240,7 +289,9 @@ def optimize():
     client = googlemaps.Client(key=os.environ.get("GOOGLE_MAPS_API_KEY"))
     matrix = None
     try:
-        matrix = simple_distance_matrix(client, waypoints, TransitMode(data["transit_mode"]))
+        matrix = simple_distance_matrix(
+            client, waypoints, TransitMode(data["transit_mode"])
+        )
     except ValueError as e:
         return jsonify({"error": e}), 400
     solution = None
@@ -267,9 +318,20 @@ def optimize():
                 case 1:
                     return jsonify({"optimized_order": [0], "time": 0}), 200
                 case 2:
-                    return jsonify({"optimized_order": [0, 1], "time": matrix[0][1]}), 200
+                    return (
+                        jsonify({"optimized_order": [0, 1], "time": matrix[0][1]}),
+                        200,
+                    )
                 case 3:
-                    return jsonify({"optimized_order": [0, 1, 2], "time": matrix[0][1] + matrix[1][2]}), 200
+                    return (
+                        jsonify(
+                            {
+                                "optimized_order": [0, 1, 2],
+                                "time": matrix[0][1] + matrix[1][2],
+                            }
+                        ),
+                        200,
+                    )
                 case _:
                     pass
 
@@ -279,7 +341,7 @@ def optimize():
             # - dist(v -> all other nodes) = inf
             # - dist(all other nodes -> v) = inf
             # - dist(v -> v) = 0
-            n = len(matrix)+1
+            n = len(matrix) + 1
             v = 0
             matrix = np.array(matrix)
             matrix = np.insert(matrix, 0, INFINITY, axis=0)
@@ -314,21 +376,127 @@ def optimize():
             solution["optimized_order"] = solution["optimized_order"][1:-1]
         case _:
             return jsonify({"error": "Invalid TSP mode"}), 400
+    solution["error"] = None
+    code = 200
     if request.method() == "PUT":
-        db.trips.update_one({"_id": b62tooid(data["trip_id"])},
-            {"$set": {
-                "optimized_order": solution["optimized_order"],
-                "time": datetime.timedelta(seconds=solution["time"]),
-            }}
-        )
-    return jsonify(solution), 200
+        # Construct list of waypoints in optimized order, including duplicate start if vanilla
+        waypoints = [waypoints[i] for i in solution["optimized_order"]]
+        # Check that trip belongs to user using username field in database
+        owner = db.trips.find_one({"_id": b62tooid(data["trip_id"])})["username"]
+        if owner == data["username"]:
+            db.trips.update_one(
+                {"_id": b62tooid(data["trip_id"])},
+                {
+                    "$set": {
+                        "waypoints": waypoints,
+                        "optimized": True,
+                        "optimization_type": tsp_mode.value,
+                        "transit_mode": data["transit_mode"],
+                        "time": datetime.timedelta(seconds=solution["time"]),
+                    }
+                },
+            )
+        else:
+            solution["error"] = "Trip does not belong to user"
+    return jsonify(solution), code
+
 
 @app.route("/api/save_trip", methods=["POST", "PUT"])
 @token_auth
 def save_trip():
-    """Saves a trip to the database. May or may not contain the optimized route."""
-    #TODO: Implment trip saving
-    pass
+    """Saves a trip to the database. May or may not contain the optimized route.
+    Input:
+        - trip_id (str): The ID of the trip to save, base62 (PUT only)
+        - name (str): The name of the trip (optional if PUT, does not update if not provided)
+        - waypoints (str[]): A list of Place IDs (order-dependent)
+        - optimized (bool): Whether the waypoints are in optimized order
+        - optimization_type (TSPMode): Must be specified if optimized is true
+        - transit_mode (TransitMode): Must be specified if optimized is true
+        - time (int): The time taken to complete the route
+
+    Output:
+        - error (str): nullable
+        - trip_id (str): The ID of the saved trip, base62
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    if request.method() == "POST"
+        if not data.get("name"):
+            return jsonify({"error": "No name provided"}), 400
+        if db.trips.find_one({"username": data["username"], "name": data["name"]}):
+            return jsonify({"error": "Duplicate trip name"}), 409
+    if request.method() == "PUT":
+        if not data.get("trip_id"):
+            return jsonify({"error": "No trip ID provided for PUT"}), 400
+        if not db.trips.find_one({"_id": b62tooid(data["trip_id"])}):
+            return jsonify({"error": "Trip not found"}), 404
+        if db.trips.find_one(
+            {
+                "username": data["username"],
+                "name": data["name"],
+                "_id": {"$ne": b62tooid(data["trip_id"])},
+            }
+        ):
+            return jsonify({"error": "Duplicate trip name"}), 409
+    if not data.get("waypoints"):
+        return jsonify({"error": "No waypoints provided"}), 400
+    if not data.get("optimized"):
+        return jsonify({"error": "No optimization status provided"}), 400
+    optimization_type = None
+    transit_mode = None
+    if data.get("optimized"):
+        if not data.get("optimization_type"):
+            return jsonify({"error": "No optimization type provided"}), 400
+        try:
+            optimization_type = TSPMode(int(data["optimization_type"]))
+        except ValueError as e:
+            return jsonify({"error": e}), 400
+        if not data.get("transit_mode"):
+            return jsonify({"error": "No transit mode provided"}), 400
+        try:
+            transit_mode = TransitMode(data["transit_mode"])
+        except ValueError as e:
+            return jsonify({"error": e}), 400
+    if not data.get("time"):
+        return jsonify({"error": "No time provided"}), 400
+    if not isinstance(data["waypoints"], list):
+        return jsonify({"error": "Waypoints must be a list"}), 400
+    if not isinstance(data["optimized"], bool):
+        return jsonify({"error": "Optimization status must be a boolean"}), 400
+    if not isinstance(data["time"], int):
+        return jsonify({"error": "Time must be an integer"}), 400
+    if request.method() == "POST":
+        trip_id = oidtob62(
+            db.trips.insert_one(
+                {
+                    "username": data["username"],
+                    "name": data["name"],
+                    "waypoints": data["waypoints"],
+                    "optimized": data["optimized"],
+                    "optimization_type": optimization_type.value if optimization_type else None,
+                    "transit_mode": transit_mode.value if transit_mode else None,
+                    "time": datetime.timedelta(seconds=data["time"]),
+                }
+            ).inserted_id
+        )
+    else:
+        trip_id = data["trip_id"]
+        db.trips.update_one(
+            {"_id": b62tooid(trip_id)},
+            {
+                "$set": {
+                    "username": data["username"],
+                    "name": data["name"],
+                    "waypoints": data["waypoints"],
+                    "optimized": data["optimized"],
+                    "optimization_type": optimization_type.value if optimization_type else None,
+                    "transit_mode": transit_mode.value if transit_mode else None,
+                    "time": datetime.timedelta(seconds=data["time"]),
+                }
+            },
+        )
+    return jsonify({"error": None, "trip_id": trip_id}), 200
 
 
 if __name__ == "__main__":
