@@ -393,6 +393,7 @@ def optimize():
                         "optimization_type": tsp_mode.value,
                         "transit_mode": data["transit_mode"],
                         "time": datetime.timedelta(seconds=solution["time"]),
+                        "modified_at": datetime.datetime.now(),
                     }
                 },
             )
@@ -477,6 +478,7 @@ def save_trip():
                     "optimization_type": optimization_type.value if optimization_type else None,
                     "transit_mode": transit_mode.value if transit_mode else None,
                     "time": datetime.timedelta(seconds=data["time"]),
+                    "modified_at": datetime.datetime.now(),
                 }
             ).inserted_id
         )
@@ -493,11 +495,84 @@ def save_trip():
                     "optimization_type": optimization_type.value if optimization_type else None,
                     "transit_mode": transit_mode.value if transit_mode else None,
                     "time": datetime.timedelta(seconds=data["time"]),
+                    "modified_at": datetime.datetime.now(),
                 }
             },
         )
     return jsonify({"error": None, "trip_id": trip_id}), 200
 
+@app.route("/api/delete_trip", methods=["DELETE"])
+@token_auth
+def delete_trip():
+    """Deletes a trip from the database.
+    Input:
+        - trip_id (str): The ID of the trip to delete, base62
+
+    Output:
+        - error (str): nullable
+    """
+    data = request.get_json()
+    trip_found = db.trips.find_one({"_id": b62tooid(data["trip_id"])})
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    if not data.get("trip_id"):
+        return jsonify({"error": "No trip ID provided"}), 400
+    if not trip_found:
+        return jsonify({"error": "Trip not found"}), 404
+    if trip_found["username"] != username:
+        return jsonify({"error": "Trip does not belong to user"}), 401
+    return jsonify({"error": None}), 200
+
+@app.route("/api/get_trips", methods=["GET"])
+@token_auth
+def get_trips():
+    """Get trips belonging to a user.
+    
+    Input:
+        - query (str): A query string to filter trips by name (optional)
+        - total (int): The total number of trips to return (optional)
+        - offset (int): The number of trips to skip (optional)
+
+    Output:
+        - error (str): nullable
+        - trips (dict[]): A list of {
+            trip_id (str, base62),
+            name (str),
+            optimized (bool),
+            optimization_type (TSPMode, nullable),
+            transit_mode (TransitMode, nullable),
+            time (timedelta, seconds),
+            modified_at (datetime, UNIX seconds),
+        }
+    """
+    data = request.get_json()
+    if not data.get("query"):
+        data["query"] = ""
+    if not data.get("total"):
+        data["total"] = 0
+    if not data.get("offset"):
+        data["offset"] = 0
+    pipeline = [
+        {"$match": {"username": username}},
+        {"$sort": {"score": {"$meta": "textScore"}}},
+        {"$skip": data["offset"]},
+        {"$limit": data["total"]},
+        {"$sort": {"modified_at": -1}},
+        {"$match": {"name": {"$regex": data["query"], "$options": "i"}}},
+        {"$project": {
+            "trip_id": 1,
+            "name": 1,
+            "optimized": 1,
+            "optimization_type": 1,
+            "transit_mode": 1,
+            "time": 1,
+            "modified_at": 1
+        }}
+    ]
+    trips = list(db.trips.aggregate(pipeline))
+    # TODO: Add return value
+    
+    
 
 if __name__ == "__main__":
     main()
