@@ -2,10 +2,8 @@ import os
 import datetime
 from base64 import b64decode
 import base62
-
 from enum import Enum
 from sys import maxsize as INFINITY
-
 import flask
 from flask import request, jsonify
 import requests
@@ -13,7 +11,6 @@ import json
 import argon2
 import pymongo
 from bson.objectid import ObjectId
-
 oidtob62 = lambda oid: base62.encodebytes(oid.binary)
 b62tooid = lambda b62: ObjectId(base62.decodebytes(b62).hex())
 import jwt
@@ -313,7 +310,6 @@ def optimize(username):
             for row in matrix:
                 row[0] = 0
             # Optimize modified problem
-            solution = None
             try:
                 solution = optimize_simple_matrix(matrix)
             except RuntimeError as e:
@@ -358,7 +354,6 @@ def optimize(username):
             matrix[n][v] = 0
 
             # Optimize modified problem
-            solution = None
             try:
                 solution = optimize_simple_matrix(matrix.tolist())
             except RuntimeError as e:
@@ -374,7 +369,6 @@ def optimize(username):
             matrix = np.insert(matrix, 0, 0, axis=1)
 
             # Optimize modified problem
-            solution = None
             try:
                 solution = optimize_simple_matrix(matrix.tolist())
             except RuntimeError as e:
