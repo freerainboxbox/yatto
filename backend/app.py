@@ -581,12 +581,17 @@ def get_trips(username):
             }
         },
     ]
+    trips = list(db.trips.aggregate(pipeline))
+    for trip in trips:
+        trip["trip_id"] = oidtob62(trip["trip_id"])
+        trip["time"] = trip["time"].total_seconds()
+        trip["modified_at"] = trip["modified_at"].timestamp()
     try:
         return (
             jsonify(
                 {
                     "error": None,
-                    "trips": list(db.trips.aggregate(pipeline)),
+                    "trips": trips,
                 }
             ),
             200,
@@ -604,15 +609,28 @@ def get_trip(username):
 
     Output:
         - error (str): nullable
-        - trip_id (str)
-        - name (str)
-        - waypoints (str[])
-        - optimized (bool)
-        - optimization_type (TSPMode, nullable)
-        - transit_mode (TransitMode, nullable)
-        - time (timedelta, seconds)
-        - modified_at (datetime, UNIX seconds)
+        - trip (dict):
+            - trip_id (str)
+            - name (str)
+            - waypoints (str[])
+            - optimized (bool)
+            - optimization_type (TSPMode, nullable)
+            - transit_mode (TransitMode, nullable)
+            - time (timedelta, seconds)
+            - modified_at (datetime, UNIX seconds)
     """
+    data = request.get_json()
+    if not data.get("trip_id"):
+        return jsonify({"error": "No trip ID provided"}), 400
+    trip_found = db.trips.find_one({"_id": b62tooid(data["trip_id"])})
+    if not trip_found:
+        return jsonify({"error": "Trip not found"}), 404
+    if trip_found["username"] != username:
+        return jsonify({"error": "Trip does not belong to user"}), 401
+    trip_found["trip_id"] = oidtob62(trip_found["trip_id"])
+    trip_found["time"] = trip_found["time"].total_seconds()
+    trip_found["modified_at"] = trip_found["modified_at"].timestamp()
+    return jsonify({"error": None, "trip": trip_found}), 200
 
 
 def place_id_to_plus_code(client: googlemaps.Client, place_id: str) -> str:
@@ -668,9 +686,12 @@ def map_url(username):
     origin_name = place_id_to_name(client, trip_found["waypoints"][0])
     destination_name = place_id_to_name(client, trip_found["waypoints"][-1])
     # Get plus codes for all intermediate waypoints [1:-2]
+    # FIXME: This works, but plus codes are not user friendly.
+    # We should attempt to convert to names and check that they resolve to the same placeid,
+    # and use plus codes as a fallback.
     intermediate_plus_codes = [
         place_id_to_plus_code(client, place_id)
-        for place_id in trip_found["waypoints"][1:-1]
+        for place_id in trip_found["waypoints"][1:-2]
     ]
     url = (
         "https://www.google.com/maps/dir/?api=1&origin="
