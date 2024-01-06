@@ -28,6 +28,8 @@ ENV_VAR_NAMES = (
     "DEBUG",
 )
 
+DIR_URL_LEN_LIMIT = 2048
+
 
 class TSPMode(Enum):
     """TSP mode constants"""
@@ -693,15 +695,58 @@ def map_url(username):
         place_id_to_plus_code(client, place_id)
         for place_id in trip_found["waypoints"][1:-2]
     ]
-    url = (
-        "https://www.google.com/maps/dir/?api=1&origin="
-        + requests.utils.quote(origin_name)
-        + "&destination="
-        + requests.utils.quote(destination_name)
-        + "&waypoints="
-        + "%7C".join(intermediate_plus_codes)
-    )
+    if (
+        len(
+            url := (
+                "https://www.google.com/maps/dir/?api=1&origin="
+                + requests.utils.quote(origin_name)
+                + "&destination="
+                + requests.utils.quote(destination_name)
+                + "&waypoints="
+                + "%7C".join(intermediate_plus_codes)
+            )
+        )
+        > DIR_URL_LEN_LIMIT
+    ):
+        return (
+            jsonify({"error": "Directions URL too long, must be <= 2048 characters"}),
+            414,
+        )
     return jsonify({"error": None, "url": url}), 200
+
+@app.route("/api/transfer_ownership", methods=["PUT"])
+@token_auth
+def transfer_ownership(username):
+    """Transfers ownership of a trip to another user.
+    Input:
+        - trip_id (str): The ID of the trip to transfer, base62
+        - new_owner (str): The username of the new owner
+
+    Output:
+        - error (str): nullable
+    """
+    data = request.get_json()
+    if not data.get("trip_id"):
+        return jsonify({"error": "No trip ID provided"}), 400
+    if not data.get("new_owner"):
+        return jsonify({"error": "No new owner provided"}), 400
+    trip_found = db.trips.find_one({"_id": b62tooid(data["trip_id"])})
+    if not trip_found:
+        return jsonify({"error": "Trip not found"}), 404
+    if trip_found["username"] != username:
+        return jsonify({"error": "Trip does not belong to user"}), 401
+    if not db.users.find_one({"username": data["new_owner"]}):
+        return jsonify({"error": "New owner does not exist"}), 404
+    db.trips.update_one(
+        {"_id": b62tooid(data["trip_id"])},
+        {
+            "$set": {
+                "username": data["new_owner"],
+                "modified_at": datetime.datetime.now(),
+            }
+        },
+    )
+    return jsonify({"error": None}), 200
 
 if __name__ == "__main__":
     main()
