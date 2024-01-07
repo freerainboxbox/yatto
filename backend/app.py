@@ -130,7 +130,10 @@ def token_auth(func: callable):
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    """Logs in a user and returns a JWT token"""
+    """Logs in a user and returns a JWT token.
+    
+    To log out, simply delete the token from the client.
+    """
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -163,7 +166,7 @@ def login():
 
 @app.route("/api/register", methods=["POST"])
 def register():
-    """Attempts to register a username (valid email) and password pair"""
+    """Attempts to register a username (valid email) and password pair."""
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -199,7 +202,7 @@ def register():
 @app.route("/api/change_password", methods=["PUT"])
 @token_auth
 def change_password(username):
-    """Attempts to change a user's password"""
+    """Attempts to change a user's password."""
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
@@ -709,21 +712,32 @@ def get_trip(username):
     return jsonify({"error": None, "trip": trip_found}), 200
 
 
-def place_id_to_plus_code(client: googlemaps.Client, place_id: str) -> str:
-    """Converts a Place ID to a plus code.
+def place_id_to_safe_name(client: googlemaps.Client, place_id: str) -> str:
+    """Converts a Place ID to a name if it will not be ambiguous,
+    otherwise, a plus code.
 
     Input:
     - client: A Google Maps API client object
     - place_id: A Place ID
 
     Output:
-    - plus_code: A plus code
+    - name: A name or plus code
     """
-    return client.place(place_id)["plus_code"]["global_code"]
+    # Query for the place ID
+    place = client.place(place_id)
+    # Reverse search the name for the place ID, check if it matches the original place ID
+    if place["place_id"] == client.find_place(
+        place["name"], "textquery", fields=["place_id"]
+    )["candidates"][0]["place_id"]:
+        return place["name"]
+    else:
+        return place["plus_code"]["global_code"]
 
 
 def place_id_to_name(client: googlemaps.Client, place_id: str) -> str:
     """Converts a Place ID to a name.
+    May be ambiguous.
+    Used for start and end points, which have a separate place ID field.
 
     Input:
     - client: A Google Maps API client object
@@ -766,7 +780,7 @@ def map_url(username):
     # We should attempt to convert to names and check that they resolve to the same placeid,
     # and use plus codes as a fallback.
     intermediate_plus_codes = [
-        place_id_to_plus_code(client, place_id)
+        place_id_to_safe_name(client, place_id)
         for place_id in trip_found["waypoints"][1:-2]
     ]
     if (
