@@ -145,7 +145,7 @@ def login():
     if not user_found:
         return jsonify({"error": "User not found"}), 404
     try:
-        Hasher.verify(user_found["password"], data["password"]):
+        Hasher.verify(user_found["password"], data["password"])
     except argon2.exceptions.VerifyMismatchError:
         return jsonify({"error": "Incorrect password"}), 401
     return (
