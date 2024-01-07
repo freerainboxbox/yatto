@@ -775,10 +775,7 @@ def map_url(username):
     client = googlemaps.Client(key=os.environ.get("GOOGLE_MAPS_API_KEY"))
     origin_name = place_id_to_name(client, trip_found["waypoints"][0])
     destination_name = place_id_to_name(client, trip_found["waypoints"][-1])
-    # Get plus codes for all intermediate waypoints [1:-2]
-    # FIXME: This works, but plus codes are not user friendly.
-    # We should attempt to convert to names and check that they resolve to the same placeid,
-    # and use plus codes as a fallback.
+    # Get safe place names for all intermediate waypoints [1:-2]
     intermediate_plus_codes = [
         place_id_to_safe_name(client, place_id)
         for place_id in trip_found["waypoints"][1:-2]
