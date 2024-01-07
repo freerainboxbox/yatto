@@ -1,5 +1,6 @@
 import os
 import datetime
+import asyncio
 from base64 import b64decode
 import base62
 from enum import Enum
@@ -140,7 +141,9 @@ def login():
     user_found = db.users.find_one({"username": data["username"]})
     if not user_found:
         return jsonify({"error": "User not found"}), 404
-    if not Hasher.verify(user_found["password"], data["password"]):
+    try:
+        Hasher.verify(user_found["password"], data["password"]):
+    except argon2.exceptions.VerifyMismatchError:
         return jsonify({"error": "Incorrect password"}), 401
     return (
         jsonify(
@@ -157,7 +160,6 @@ def login():
         ),
         200,
     )
-
 
 @app.route("/api/register", methods=["POST"])
 def register():
@@ -194,6 +196,78 @@ def register():
     )
     return jsonify({"error": None}), 200
 
+@app.route("/api/change_password", methods=["PUT"])
+@token_auth
+def change_password(username):
+    """Attempts to change a user's password"""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    if not data["new_password"]:
+        return jsonify({"error": "No new password provided"}), 400
+    user_found = db.users.find_one({"username": username})
+    if not user_found:
+        return jsonify({"error": "User not found"}), 404
+    db.users.update_one(
+        {"username": username},
+        {
+            "$set": {
+                "password": Hasher.hash(data["new_password"]),
+            }
+        },
+    )
+    return jsonify({"error": None}), 200
+
+deletion_tasks = {}
+
+async def deletion_job(username):
+    """Deletes a user after 24 hours."""
+    await asyncio.sleep(86400)
+    db.trips.delete_many({"username": username})
+    db.users.delete_one({"_id": username})
+    del deletion_tasks[username]
+
+@app.route("/api/delete_user", methods=["DELETE"])
+@token_auth
+def delete_user(username):
+    """Attempts to delete a user after 24 hours.
+    Must be logged in to user to be deleted.
+
+    Input: Empty payload {}
+
+    Output:
+        - error (str): nullable
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    user_found = db.users.find_one({"username": username})
+    if not user_found:
+        return jsonify({"error": "User not found or already deleted"}), 404
+    deletion_tasks[username] = asyncio.create_task(deletion_job(username))
+    return jsonify({"error": None}), 200
+
+@app.route("/api/cancel_delete_user", methods=["POST"])
+@token_auth
+def cancel_delete_user(username):
+    """Attempts to cancel a user's deletion.
+    Must be logged in to user to restore.
+    
+    Input: Empty payload {}
+
+    Output:
+        - error (str): nullable
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    user_found = db.users.find_one({"username": username})
+    if not user_found:
+        return jsonify({"error": "User not found or already deleted"}), 404
+    if username in deletion_tasks:
+        deletion_tasks[username].cancel()
+        del deletion_tasks[username]
+    return jsonify({"error": None}), 200
 
 def simple_distance_matrix(
     client: googlemaps.Client, waypoints: list[str], transit_mode: TransitMode
