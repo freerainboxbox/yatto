@@ -25,3 +25,10 @@ body {
     )
     rgb(var(--background-start-rgb));
 }
+
+.userpass {
+  font-family: monospace;
+  font-size: 1.25rem;
+  width: '200px';
+  height: '30px';
+}
