@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 
+interface PasswordInputProps {
+    value: string;
+    onChange: (value: string) => void;
+}
 
 const PasswordInput: React.FC = () => {
     const [password, setPassword] = useState('');
@@ -12,7 +16,7 @@ const PasswordInput: React.FC = () => {
 
     return (
         <input
-            class = "userpass"
+            className = "userpass"
             type="password"
             value={password}
             placeholder='Enter your password'

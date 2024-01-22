@@ -1,9 +1,14 @@
 import React from 'react';
 
-const UsernameInput: React.FC = () => {
+interface UsernameInputProps {
+    value: string;
+    onChange: (value: string) => void;
+}
+
+const UsernameInput: React.FC<UsernameInputProps> = () => {
     return (
         <input
-            class = "userpass"
+            className = "userpass"
             type="text"
             placeholder="Enter your username"
             style={{ width: '200px', height: '30px' }}
